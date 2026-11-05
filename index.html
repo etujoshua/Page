@@ -1537,6 +1537,7 @@ function tradeImpactPct(usd){
 function poolRemaining(){ return Math.max(0, TOKEN_CAP - Math.max(0,circulating)); }
 function hashRatePerUser(){      // PAGE per hour worth EARN_USD_HR; exactly 0 once the 10M pool is used up
   if(poolRemaining()<=0) return 0;
+  if(typeof navigator!=='undefined'&&navigator.onLine===false) return 0;   // no mining while offline
   return EARN_USD_HR / tokenPrice();
 }
 function fmtUSD(v){ const a=Math.abs(v); return (v<0?'-':'')+'$'+(a>=1?a.toFixed(2):a.toFixed(4)); }
@@ -2013,7 +2014,7 @@ async function openBook(id){
     const poolMu=Math.max(0,Math.floor(poolRemaining()*MU));
     const g=Math.min(Math.floor(exact),poolMu);
     carry=g===Math.floor(exact)?exact-g:0;
-    const ms=document.getElementById('mineState'); if(ms) ms.textContent=g>0?'Mining Active':'Pool exhausted';
+    const ms=document.getElementById('mineState'); if(ms) ms.textContent=navigator.onLine===false?'Offline: reconnect to keep mining':(g>0?'Mining Active':'Pool exhausted');
     if(g>0){ Led.mine(U,g); circulating+=g/MU; sessionToks+=g/MU; sessionEarned+=g/MU; }
     document.getElementById('mineEarned').textContent=sessionToks.toFixed(4);
     document.getElementById('progFill').style.width=((secs%60)/60*100)+'%';
@@ -3024,7 +3025,7 @@ setInterval(()=>{ try{ renderLaunch(); }catch(e){} },30000);
 
 // ── Referrals ────────────────────────────────────────────────────
 const myRefCode=()=>U?(U.refCode||String(U.uid).replace(/^u_/,'').slice(0,8)):'';
-const SITE_URL='';   // ← your live address once hosted, e.g. 'https://page-books.netlify.app/'
+const SITE_URL='https://pagecoin.netlify.app/';   // ← your live address once hosted, e.g. 'https://page-books.netlify.app/'
 const refLink=code=>{
   let b=''; try{ if(/^https?:$/.test(location.protocol)&&!/claude\.ai|claudeusercontent|localhost|127\.0\.0\.1/.test(location.host)) b=location.origin+location.pathname; }catch(e){}
   if(!b) b=SITE_URL;
@@ -3131,6 +3132,9 @@ async function installApp(){
 if('serviceWorker' in navigator && location.protocol==='https:' && !/claude\.ai|claudeusercontent/.test(location.host)){
   window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
 }
+
+window.addEventListener('offline',()=>{ try{ showToast('You are offline. Mining is paused.'); }catch(e){} });
+window.addEventListener('online',()=>{ try{ showToast('Back online. Mining resumed.'); }catch(e){} });
 const UPDATE_PUB={"kty":"EC","crv":"P-256","x":"77IHkb6of37RJSg49HnYvVBx7UtahmB4Q2jv-ZyZ-FE","y":"5SQdQtSB8EeZDIyISfmAgCzTXFNdCZn5RACcSbixGX8"};
 const UPDATE_ENC={s:"0s0WGiHut22y57iZKtk4og==",i:"RCZvi+W/VRzG2S04",c:"nk3c12QGB70pzMkheTTr4BzlJ9+2vLntL8mpzqKhKgGc4QFky7peJ7N1HzkkH68OcfMHlWfnNv3lLDpParsuDxiRx4WyE5+0KVMI/GrBZLZ8lrX1cEGdKw4EB/5vJOO7H+pQaR1ZuaehB+yO9+sjukpeTGWSyvTgKD4NOux69pc/9KE6+Q5o2sShowKqawA57YqjXXHDh/LhiXyXq61c7T19MRI9ZHyPZAT57PjTJXpEdUBY3mfveN6/6SmwRhGLtkxg/MVx7Gi6JiQYCxCuZlvzlkma3soDfGLVKp3f"};
 // ════════════════════════════════════════════════════════════════
