@@ -14,15 +14,15 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+
 
 <!-- PDF + DOCX parsers -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+
+
 <script>if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';</script>
 
 <!-- Paystack -->
-<script src="https://js.paystack.co/v1/inline.js"></script>
+
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -1252,7 +1252,7 @@ function initFirebase(){
     firebase.initializeApp(FIREBASE_CONFIG);
     db      = firebase.firestore();
     auth    = firebase.auth();
-    storage = firebase.storage();
+    storage = firebase.storage?firebase.storage():null;
     configOk = true;
 
     // Enable offline persistence
@@ -2495,7 +2495,7 @@ const MP_TOKEN='0xcebA9300f2b948710d2653dD7B07f33A8B32118C';  // USDC on Celo ma
 const MP_CHAIN_ID='0xa4ec';                                  // Celo mainnet (42220). Use a testnet token + chain id to test first.
 const HOLD_MS=15*60000;
 const TRANSFER_TOPIC='0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-const mpLive=()=>!!(typeof window!=='undefined'&&window.ethereum);
+const mpLive=()=>!!(typeof window!=='undefined'&&window.ethereum&&window.ethereum.isMiniPay);
 const pad32=h=>h.replace(/^0x/,'').toLowerCase().padStart(64,'0');
 const eth=(method,params)=>window.ethereum.request({method,params:params||[]});
 
@@ -3280,7 +3280,7 @@ const UPDATE_ENC={s:"0s0WGiHut22y57iZKtk4og==",i:"RCZvi+W/VRzG2S04",c:"nk3c12QGB
 //  The passkey unlocks a private signing key that is stored encrypted inside this app.
 //  Every user's app checks the signature with the matching public key before showing or running an update.
 // ════════════════════════════════════════════════════════════════
-const UPD_KEY='pc_upd_pkg', UPD_STACK='pc_upd_stack', BAKED_V=36;   // BAKED_V: updates up to this number are already inside this file
+const UPD_KEY='pc_upd_pkg', UPD_STACK='pc_upd_stack', BAKED_V=40;   // BAKED_V: updates up to this number are already inside this file
 let availableUpdate=null, pendingUpdates=[], updSubbed=false, appliedV=BAKED_V;
 const u8=b=>Uint8Array.from(atob(b),c=>c.charCodeAt(0));
 const updBytes=u=>new TextEncoder().encode(u.v+'|'+u.notes+'|'+u.code);
@@ -5157,6 +5157,121 @@ async function exportEmails(){
   // before a real payment: make sure the wallet is on Celo
   var _buy=buyLive;
   buyLive=async function(g){ try{ await ensureCelo(); }catch(e){ showToast('Please switch your wallet to the Celo network.'); return; } return _buy.apply(this,arguments); };
+
+  // any connected wallet pays for real (before, only MiniPay did; everywhere else was a simulation)
+  function walletLive(){ return !!(window.ethereum&&U&&U.minipay&&U.minipay.wallet&&U.minipay.wallet!=='Address only'); }
+  handleBuy=async function(){
+    if(!requireOpen()) return;
+    if(isUserMinor()){ showToast('🔒 Under 18 accounts are restricted to Mining-Only mode.'); return; }
+    if(buyBusy) return;
+    if(!U.minipay){ showToast('Connect your wallet first.'); pick(); return; }
+    const usd=parseFloat(document.getElementById('mp-amt').value);
+    if(!usd||usd<1){ showToast('Minimum purchase is $1.'); return; }
+    const gross=usdToMu(usd), q=quoteBuy(gross);
+    if(q.tok<=0){ showToast(openSupplyMu()<=0?'No tokens are listed for sale yet.':'This hour\'s 833 PAGE quota is used up. Next block opens soon.'); return; }
+    if(q.partial&&!(await askConfirm('Partial fill','Only '+fmtP(q.tok)+' PAGE is available (you asked for '+fmtP(q.want)+'). Buy that amount for '+fmtMu(q.spend)+'?','Buy'))) return;
+    const spendMu=q.partial?q.spend:gross;
+    if(mpLive()||walletLive()) return buyLive(spendMu);
+    return completePurchase(spendMu,'mp_'+randHex(8));
+  };
+})();
+
+// ── v37: MiniPay row no longer opens a link MiniPay rejects ──
+(function(){
+  if(window.__v37) return; window.__v37=1;
+  setInterval(function(){
+    var s=document.getElementById('wcPick'); if(!s) return;
+    var row=Array.prototype.slice.call(s.querySelectorAll('button')).find(function(x){ return /^MiniPay/.test(x.innerText.replace(/^.\n/,'').trim())||/\nMiniPay/.test(x.innerText); });
+    if(!row||row.dataset.v37) return;
+    var n=row.cloneNode(true); n.dataset.v37='1'; row.parentNode.replaceChild(n,row);
+    var sub=n.querySelectorAll('div'); if(sub[1]&&!(window.ethereum&&window.ethereum.isMiniPay)) sub[1].textContent='Open Page from inside MiniPay';
+    n.onclick=async function(){
+      if(!(window.ethereum&&window.ethereum.isMiniPay)){ showToast('Open MiniPay → Settings → Developer Settings → Load Test Page, and enter this site\'s address.'); return; }
+      try{
+        var r=await window.ethereum.request({method:'eth_requestAccounts',params:[]}), a=(r&&r[0])||'';
+        if(!isAddr(a)){ showToast('MiniPay did not return an address.'); return; }
+        U.minipay={address:a,at:Date.now(),wallet:'MiniPay'}; await persistU(); s.remove(); updateUI(); showToast('✓ MiniPay connected: '+shortAddr(a));
+      }catch(e){ showToast('Could not connect. Try again.'); }
+    };
+  },1000);
+})();
+
+// ── v38: connect any phone wallet through WalletConnect (you stay in this browser; the wallet app opens by itself) ──
+(function(){
+  if(window.__v38) return; window.__v38=1;
+  var PID='6c4c7bf3ffbf3bd413b1595d153b90bc';
+  var LIB='https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js';
+  var wc=null;
+  function el(t,txt,css){ var e=document.createElement(t); if(txt!=null) e.textContent=txt; if(css) e.style.cssText=css; return e; }
+  function lib(){ var g=window['@walletconnect/ethereum-provider']; if(g&&g.EthereumProvider) return g.EthereumProvider; if(g&&g.default&&g.default.EthereumProvider) return g.default.EthereumProvider; if(window.EthereumProvider&&window.EthereumProvider.init) return window.EthereumProvider; return null; }
+  function load(){ return new Promise(function(res,rej){ if(lib()) return res(lib()); var s=document.createElement('script'); s.src=LIB; s.onload=function(){ lib()?res(lib()):rej(new Error('lib')); }; s.onerror=function(){ rej(new Error('load')); }; document.head.appendChild(s); }); }
+  async function getWC(){
+    if(wc) return wc;
+    var EP=await load();
+    wc=await EP.init({projectId:PID,chains:[42220],showQrModal:true,methods:['eth_sendTransaction','personal_sign'],rpcMap:{42220:'https://forno.celo.org'},
+      metadata:{name:'Page',description:'Read books and earn PAGE',url:location.origin,icons:[location.origin+'/icon-192.png']}});
+    var orig=wc.request.bind(wc);
+    wc.request=function(a){ if(a&&/sendTransaction|personal_sign|signTypedData/.test(a.method)) openApp(); return orig(a); };
+    return wc;
+  }
+  function openApp(){ try{ var m=wc&&wc.session&&wc.session.peer&&wc.session.peer.metadata, r=m&&m.redirect, l=r&&(r.native||r.universal); if(l) window.open(l,'_self'); }catch(e){} }
+  function use(p){ try{ Object.defineProperty(window,'ethereum',{value:p,configurable:true,writable:true}); }catch(e){ try{ window.ethereum=p; }catch(x){} } }
+
+  async function connectWC(){
+    try{
+      showToast('Opening wallet list…');
+      var p=await getWC();
+      try{ if(p.session){ await p.disconnect(); } }catch(e){}
+      await p.connect();
+      var addr=(p.accounts&&p.accounts[0])||''; if(!isAddr(addr)){ showToast('The wallet did not return an address.'); return; }
+      var name=(p.session&&p.session.peer&&p.session.peer.metadata&&p.session.peer.metadata.name)||'Wallet';
+      use(p); U.minipay={address:addr,at:Date.now(),wallet:name,via:'wc'};
+      await persistU(); close(); updateUI(); showToast('✓ '+name+' connected: '+shortAddr(addr));
+    }catch(e){ showToast((e&&e.message==='load')?'Could not load the wallet connector. Check your internet.':'Connection cancelled or failed. Try again.'); }
+  }
+  async function connectInjected(){
+    var p=window.ethereum; if(!p||(wc&&p===wc)){ showToast('No wallet found in this browser.'); return; }
+    try{ var r=await p.request({method:'eth_requestAccounts',params:[]}), a=(r&&r[0])||''; if(!isAddr(a)){ showToast('No address returned.'); return; }
+      if(window.__ensureCelo){ try{ await window.__ensureCelo(p); }catch(e){} }
+      U.minipay={address:a,at:Date.now(),wallet:p.isMiniPay?'MiniPay':(p.isMetaMask?'MetaMask':'Browser wallet')}; await persistU(); close(); updateUI(); showToast('✓ Connected: '+shortAddr(a)); }
+    catch(e){ showToast('Could not connect. Try again.'); }
+  }
+  function close(){ var s=document.getElementById('wcPick2'); if(s) s.remove(); }
+  function row(letter,col,title,sub,fn){
+    var r=el('button',null,'display:flex;align-items:center;gap:.7rem;width:100%;text-align:left;background:transparent;color:inherit;border:1px solid var(--border,#ddd);border-radius:10px;padding:.65rem .7rem;margin-bottom:.45rem;'); r.type='button';
+    r.appendChild(el('span',letter,'width:2rem;height:2rem;border-radius:50%;background:'+col+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex:none;'));
+    var t=el('span',null,'flex:1;'); t.appendChild(el('div',title,'font-weight:700;')); t.appendChild(el('div',sub,'font-size:.7rem;opacity:.65;')); r.appendChild(t); r.onclick=fn; return r;
+  }
+  function pick(){
+    close();
+    var s=el('div',null,'position:fixed;inset:0;z-index:9997;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;'); s.id='wcPick2';
+    s.onclick=function(e){ if(e.target===s) close(); };
+    var b=el('div',null,'background:var(--card,#fff);color:var(--ink,#111);width:100%;max-width:420px;border-radius:14px 14px 0 0;padding:1rem;max-height:85vh;overflow:auto;');
+    b.appendChild(el('div','Connect wallet','font-weight:800;font-size:1.05rem;margin-bottom:.2rem;'));
+    b.appendChild(el('div','Page uses USDC on the Celo network.','font-size:.74rem;opacity:.7;margin-bottom:.7rem;'));
+    var inMini=!!(window.ethereum&&window.ethereum.isMiniPay);
+    b.appendChild(row('W','#3b82f6','Wallet app (recommended)','MetaMask, Trust Wallet, Valora and more · opens your wallet app',connectWC));
+    if(inMini) b.appendChild(row('M','#16a34a','MiniPay','Detected · tap to connect',connectInjected));
+    else if(window.ethereum&&!(wc&&window.ethereum===wc)) b.appendChild(row('•','#6b7280','This browser\'s wallet','Detected · tap to connect',connectInjected));
+    var det=document.createElement('details'); det.style.cssText='margin:.3rem 0 .6rem;';
+    det.appendChild(el('summary','Enter an address by hand (receive only)','font-size:.76rem;cursor:pointer;opacity:.8;'));
+    var inp=document.createElement('input'); inp.className='fc'; inp.placeholder='0x…'; inp.style.cssText='margin-top:.4rem;font-family:monospace;font-size:.74rem;';
+    var sv=el('button','Save address',null); sv.className='btn btn-outline btn-full'; sv.type='button'; sv.style.marginTop='.4rem';
+    sv.onclick=async function(){ var a=inp.value.trim(); if(!isAddr(a)){ showToast('Enter a valid 0x address (42 characters).'); return; } U.minipay={address:a,at:Date.now(),wallet:'Address only'}; await persistU(); close(); updateUI(); showToast('Address saved. Paying needs a connected wallet.'); };
+    det.appendChild(inp); det.appendChild(sv); b.appendChild(det);
+    if(U&&U.minipay){ var d=el('button','Disconnect wallet',null); d.className='btn btn-outline btn-full'; d.type='button'; d.onclick=async function(){ try{ if(wc&&wc.session) await wc.disconnect(); }catch(e){} U.minipay=null; await persistU(); close(); updateUI(); }; b.appendChild(d); }
+    var c=el('button','Close',null); c.className='btn btn-outline btn-full'; c.type='button'; c.style.marginTop='.4rem'; c.onclick=close; b.appendChild(c);
+    s.appendChild(b); document.body.appendChild(s);
+  }
+  // replace the earlier wallet list with this one
+  var restored=false;
+  setInterval(function(){
+    var old=document.getElementById('wcPick'); if(old){ old.remove(); pick(); }
+    if(!restored&&U&&U.minipay&&U.minipay.via==='wc'&&!window.ethereum){
+      restored=true;
+      getWC().then(function(p){ if(p.session&&p.accounts&&p.accounts[0]) use(p); }).catch(function(){ restored=false; });
+    }
+  },800);
 })();
 
 </script>
