@@ -3280,7 +3280,7 @@ const UPDATE_ENC={s:"0s0WGiHut22y57iZKtk4og==",i:"RCZvi+W/VRzG2S04",c:"nk3c12QGB
 //  The passkey unlocks a private signing key that is stored encrypted inside this app.
 //  Every user's app checks the signature with the matching public key before showing or running an update.
 // ════════════════════════════════════════════════════════════════
-const UPD_KEY='pc_upd_pkg', UPD_STACK='pc_upd_stack', BAKED_V=40;   // BAKED_V: updates up to this number are already inside this file
+const UPD_KEY='pc_upd_pkg', UPD_STACK='pc_upd_stack', BAKED_V=62;   // BAKED_V: updates up to this number are already inside this file
 let availableUpdate=null, pendingUpdates=[], updSubbed=false, appliedV=BAKED_V;
 const u8=b=>Uint8Array.from(atob(b),c=>c.charCodeAt(0));
 const updBytes=u=>new TextEncoder().encode(u.v+'|'+u.notes+'|'+u.code);
@@ -5272,6 +5272,812 @@ async function exportEmails(){
       getWC().then(function(p){ if(p.session&&p.accounts&&p.accounts[0]) use(p); }).catch(function(){ restored=false; });
     }
   },800);
+})();
+
+// ── v44: wallet connector without the pop-up modal (clear errors, wallet app links) + "wallet" wording instead of MiniPay ──
+(function(){
+  if(window.__v44) return; window.__v44=1;
+  var PID='6c4c7bf3ffbf3bd413b1595d153b90bc';
+  var CDN=['https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js','https://unpkg.com/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js'];
+  var wc=null, pending=null;
+  function el(t,txt,css){ var e=document.createElement(t); if(txt!=null) e.textContent=txt; if(css) e.style.cssText=css; return e; }
+  function lib(){
+    var g=window['@walletconnect/ethereum-provider']; if(g){ if(g.EthereumProvider) return g.EthereumProvider; if(g.default&&g.default.EthereumProvider) return g.default.EthereumProvider; }
+    if(window.EthereumProvider&&window.EthereumProvider.init) return window.EthereumProvider;
+    try{ var k=Object.keys(window).find(function(x){ var v=window[x]; return v&&typeof v==='object'&&v.EthereumProvider&&v.EthereumProvider.init; }); if(k) return window[k].EthereumProvider; }catch(e){}
+    return null;
+  }
+  function addScript(src){ return new Promise(function(res,rej){ var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){ rej(new Error('blocked: '+src.split('/')[2])); }; document.head.appendChild(s); }); }
+  async function load(){
+    if(lib()) return lib();
+    var last=null;
+    for(var i=0;i<CDN.length;i++){ try{ await addScript(CDN[i]); if(lib()) return lib(); last=new Error('connector loaded but not recognised'); }catch(e){ last=e; } }
+    throw last||new Error('could not load connector');
+  }
+  async function make(){
+    var EP=await load();
+    var p=await EP.init({projectId:PID,chains:[42220],showQrModal:false,methods:['eth_sendTransaction','personal_sign'],rpcMap:{42220:'https://forno.celo.org'},
+      metadata:{name:'Page',description:'Read books and earn PAGE',url:location.origin,icons:[location.origin+'/icon-192.png']}});
+    var orig=p.request.bind(p);
+    p.request=function(a){ if(a&&/sendTransaction|personal_sign|signTypedData/.test(a.method)) openApp(); return orig(a); };
+    return p;
+  }
+  function openApp(){ try{
+    var sc=U&&U.minipay&&U.minipay.scheme; if(sc){ window.open(sc,'_self'); return; }
+    var m=wc&&wc.session&&wc.session.peer&&wc.session.peer.metadata, r=m&&m.redirect, l=r&&(r.native||r.universal); if(l) window.open(l,'_self'); }catch(e){} }
+  function use(p){ try{ Object.defineProperty(window,'ethereum',{value:p,configurable:true,writable:true}); }catch(e){ try{ window.ethereum=p; }catch(x){} } }
+  function closeLinks(){ var s=document.getElementById('wcLinks'); if(s) s.remove(); }
+  function showLinks(uri){
+    closeLinks();
+    var s=el('div',null,'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;'); s.id='wcLinks';
+    var b=el('div',null,'background:var(--card,#fff);color:var(--ink,#111);width:100%;max-width:420px;border-radius:14px 14px 0 0;padding:1rem;');
+    b.appendChild(el('div','Choose your wallet app','font-weight:800;font-size:1.05rem;margin-bottom:.2rem;'));
+    b.appendChild(el('div','Tap your wallet. It opens, you approve, then come back to this page.','font-size:.74rem;opacity:.7;margin-bottom:.7rem;'));
+    var enc=encodeURIComponent(uri);
+    function btn(label,sub,href,scheme){ var a=el('a',null,'display:block;border:1px solid var(--border,#ddd);border-radius:10px;padding:.65rem .75rem;margin-bottom:.45rem;color:inherit;text-decoration:none;');
+      a.href=href; a.appendChild(el('div',label,'font-weight:700;')); a.appendChild(el('div',sub,'font-size:.7rem;opacity:.65;')); a.onclick=function(){ pending=scheme||''; }; b.appendChild(a); }
+    btn('MetaMask','Opens the MetaMask app','metamask://wc?uri='+enc,'metamask://');
+    btn('Trust Wallet','Opens the Trust Wallet app','trust://wc?uri='+enc,'trust://');
+    btn('Any other wallet','Your phone lists the wallet apps that can open it',uri,'');
+    var cp=el('button','Copy connection link',null); cp.className='btn btn-outline btn-full'; cp.type='button';
+    cp.onclick=function(){ try{ navigator.clipboard.writeText(uri); showToast('Link copied. Paste it in your wallet\'s WalletConnect option.'); }catch(e){ showToast('Could not copy.'); } };
+    b.appendChild(cp);
+    var x=el('button','Cancel',null); x.className='btn btn-outline btn-full'; x.type='button'; x.style.marginTop='.4rem'; x.onclick=function(){ closeLinks(); try{ if(wc&&!wc.session) wc.disconnect(); }catch(e){} }; b.appendChild(x);
+    s.appendChild(b); document.body.appendChild(s);
+  }
+  async function connect(){
+    try{
+      showToast('Preparing wallet connection…');
+      if(!wc) wc=await make();
+      try{ if(wc.session) await wc.disconnect(); }catch(e){}
+      pending=null;
+      wc.removeAllListeners&&wc.removeAllListeners('display_uri');
+      wc.on('display_uri',function(uri){ showLinks(uri); });
+      await wc.connect();
+      closeLinks();
+      var addr=(wc.accounts&&wc.accounts[0])||''; if(!isAddr(addr)){ showToast('The wallet did not return an address.'); return; }
+      var m=wc.session&&wc.session.peer&&wc.session.peer.metadata, name=(m&&m.name)||'Wallet';
+      use(wc); U.minipay={address:addr,at:Date.now(),wallet:name,via:'wc2',scheme:pending||''};
+      await persistU(); var p=document.getElementById('wcPick2'); if(p) p.remove(); updateUI(); showToast('✓ '+name+' connected: '+shortAddr(addr));
+    }catch(e){ closeLinks(); wc=null; showToast('Wallet error: '+String((e&&(e.message||e))||'unknown').slice(0,140)); }
+  }
+  // the "Wallet app" row in the wallet list now uses this connector
+  var restored=false;
+  setInterval(function(){
+    var s=document.getElementById('wcPick2');
+    if(s){ var row=Array.prototype.slice.call(s.querySelectorAll('button')).find(function(x){ return /Wallet app/.test(x.innerText); });
+      if(row&&!row.dataset.v44){ var n=row.cloneNode(true); n.dataset.v44='1'; row.parentNode.replaceChild(n,row); n.onclick=connect; } }
+    if(!restored&&U&&U.minipay&&U.minipay.via==='wc2'&&!window.ethereum){ restored=true; make().then(function(p){ wc=p; if(p.session&&p.accounts&&p.accounts[0]) use(p); }).catch(function(){ restored=false; }); }
+    relabel();
+  },700);
+
+  // wording: "wallet" instead of "MiniPay"
+  var MAP=[[/Buy PAGE with MiniPay/g,'Buy PAGE with your wallet'],[/Connect MiniPay/g,'Connect wallet'],[/MiniPay connected/g,'Wallet connected'],[/MiniPay address/g,'Wallet address']];
+  function walk(root){
+    if(!root) return;
+    var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null), n, list=[];
+    while((n=w.nextNode())) if(n.nodeValue.indexOf('MiniPay')>=0) list.push(n);
+    list.forEach(function(t){ var v=t.nodeValue; MAP.forEach(function(m){ v=v.replace(m[0],m[1]); }); if(v!==t.nodeValue) t.nodeValue=v; });
+  }
+  function relabel(){
+    walk(document.getElementById('walletBody')); walk(document.getElementById('buyBtn'));
+    var a=document.getElementById('mp-addr'); if(a){ var g=a.closest('.fg'); if(g) g.style.display='none'; }
+  }
+})();
+
+// ── v45: wallet connector without the pop-up modal (clear errors, wallet app links) + "wallet" wording instead of MiniPay ──
+(function(){
+  if(window.__v45) return; window.__v45=1;
+  var PID='6c4c7bf3ffbf3bd413b1595d153b90bc';
+  var CDN=['https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js','https://unpkg.com/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js'];
+  var wc=null, pending=null;
+  function el(t,txt,css){ var e=document.createElement(t); if(txt!=null) e.textContent=txt; if(css) e.style.cssText=css; return e; }
+  var BEFORE=new Set(Object.getOwnPropertyNames(window)), found=null, newKeys=[];
+  function isEP(v){ return v&&(typeof v==='function'||typeof v==='object')&&typeof v.init==='function'; }
+  function pickEP(v){ if(!v) return null; try{ if(isEP(v)) return v; if(isEP(v.EthereumProvider)) return v.EthereumProvider; if(v.default){ if(isEP(v.default)) return v.default; if(isEP(v.default.EthereumProvider)) return v.default.EthereumProvider; } }catch(e){} return null; }
+  function lib(){
+    if(found) return found;
+    var names=['@walletconnect/ethereum-provider','WalletConnectEthereumProvider','EthereumProvider','WalletConnectProvider'];
+    for(var i=0;i<names.length;i++){ var r=pickEP(window[names[i]]); if(r) return (found=r); }
+    var ks=Object.getOwnPropertyNames(window).filter(function(k){ return !BEFORE.has(k); }); newKeys=ks;
+    for(var j=0;j<ks.length;j++){ var v; try{ v=window[ks[j]]; }catch(e){ continue; } var r2=pickEP(v); if(r2) return (found=r2); }
+    return null;
+  }
+  function addScript(src){ return new Promise(function(res,rej){ var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){ rej(new Error('blocked: '+src.split('/')[2])); }; document.head.appendChild(s); }); }
+  async function load(){
+    if(lib()) return lib();
+    var last=null;
+    for(var i=0;i<CDN.length;i++){ try{ await addScript(CDN[i]); if(lib()) return lib(); last=new Error('connector loaded but not recognised. New names: '+newKeys.slice(0,8).join(',')); }catch(e){ last=e; } }
+    throw last||new Error('could not load connector');
+  }
+  async function make(){
+    var EP=await load();
+    var p=await EP.init({projectId:PID,chains:[42220],showQrModal:false,methods:['eth_sendTransaction','personal_sign'],rpcMap:{42220:'https://forno.celo.org'},
+      metadata:{name:'Page',description:'Read books and earn PAGE',url:location.origin,icons:[location.origin+'/icon-192.png']}});
+    var orig=p.request.bind(p);
+    p.request=function(a){ if(a&&/sendTransaction|personal_sign|signTypedData/.test(a.method)) openApp(); return orig(a); };
+    return p;
+  }
+  function openApp(){ try{
+    var sc=U&&U.minipay&&U.minipay.scheme; if(sc){ window.open(sc,'_self'); return; }
+    var m=wc&&wc.session&&wc.session.peer&&wc.session.peer.metadata, r=m&&m.redirect, l=r&&(r.native||r.universal); if(l) window.open(l,'_self'); }catch(e){} }
+  function use(p){ try{ Object.defineProperty(window,'ethereum',{value:p,configurable:true,writable:true}); }catch(e){ try{ window.ethereum=p; }catch(x){} } }
+  function closeLinks(){ var s=document.getElementById('wcLinks'); if(s) s.remove(); }
+  function showLinks(uri){
+    closeLinks();
+    var s=el('div',null,'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;'); s.id='wcLinks';
+    var b=el('div',null,'background:var(--card,#fff);color:var(--ink,#111);width:100%;max-width:420px;border-radius:14px 14px 0 0;padding:1rem;');
+    b.appendChild(el('div','Choose your wallet app','font-weight:800;font-size:1.05rem;margin-bottom:.2rem;'));
+    b.appendChild(el('div','Tap your wallet. It opens, you approve, then come back to this page.','font-size:.74rem;opacity:.7;margin-bottom:.7rem;'));
+    var enc=encodeURIComponent(uri);
+    function btn(label,sub,href,scheme){ var a=el('a',null,'display:block;border:1px solid var(--border,#ddd);border-radius:10px;padding:.65rem .75rem;margin-bottom:.45rem;color:inherit;text-decoration:none;');
+      a.href=href; a.appendChild(el('div',label,'font-weight:700;')); a.appendChild(el('div',sub,'font-size:.7rem;opacity:.65;')); a.onclick=function(){ pending=scheme||''; }; b.appendChild(a); }
+    btn('MetaMask','Opens the MetaMask app','metamask://wc?uri='+enc,'metamask://');
+    btn('Trust Wallet','Opens the Trust Wallet app','trust://wc?uri='+enc,'trust://');
+    btn('Any other wallet','Your phone lists the wallet apps that can open it',uri,'');
+    var cp=el('button','Copy connection link',null); cp.className='btn btn-outline btn-full'; cp.type='button';
+    cp.onclick=function(){ try{ navigator.clipboard.writeText(uri); showToast('Link copied. Paste it in your wallet\'s WalletConnect option.'); }catch(e){ showToast('Could not copy.'); } };
+    b.appendChild(cp);
+    var x=el('button','Cancel',null); x.className='btn btn-outline btn-full'; x.type='button'; x.style.marginTop='.4rem'; x.onclick=function(){ closeLinks(); try{ if(wc&&!wc.session) wc.disconnect(); }catch(e){} }; b.appendChild(x);
+    s.appendChild(b); document.body.appendChild(s);
+  }
+  async function connect(){
+    try{
+      showToast('Preparing wallet connection…');
+      if(!wc) wc=await make();
+      try{ if(wc.session) await wc.disconnect(); }catch(e){}
+      pending=null;
+      wc.removeAllListeners&&wc.removeAllListeners('display_uri');
+      wc.on('display_uri',function(uri){ showLinks(uri); });
+      await wc.connect();
+      closeLinks();
+      var addr=(wc.accounts&&wc.accounts[0])||''; if(!isAddr(addr)){ showToast('The wallet did not return an address.'); return; }
+      var m=wc.session&&wc.session.peer&&wc.session.peer.metadata, name=(m&&m.name)||'Wallet';
+      use(wc); U.minipay={address:addr,at:Date.now(),wallet:name,via:'wc2',scheme:pending||''};
+      await persistU(); var p=document.getElementById('wcPick2'); if(p) p.remove(); updateUI(); showToast('✓ '+name+' connected: '+shortAddr(addr));
+    }catch(e){ closeLinks(); wc=null; showToast('Wallet error: '+String((e&&(e.message||e))||'unknown').slice(0,140)); }
+  }
+  // the "Wallet app" row in the wallet list now uses this connector
+  var restored=false;
+  setInterval(function(){
+    var s=document.getElementById('wcPick2');
+    if(s){ var row=Array.prototype.slice.call(s.querySelectorAll('button')).find(function(x){ return /Wallet app/.test(x.innerText); });
+      if(row&&!row.dataset.v45){ var n=row.cloneNode(true); n.dataset.v45='1'; row.parentNode.replaceChild(n,row); n.onclick=connect; } }
+    if(!restored&&U&&U.minipay&&U.minipay.via==='wc2'&&!window.ethereum){ restored=true; make().then(function(p){ wc=p; if(p.session&&p.accounts&&p.accounts[0]) use(p); }).catch(function(){ restored=false; }); }
+    relabel();
+  },700);
+
+  // wording: "wallet" instead of "MiniPay"
+  var MAP=[[/Buy PAGE with MiniPay/g,'Buy PAGE with your wallet'],[/Connect MiniPay/g,'Connect wallet'],[/MiniPay connected/g,'Wallet connected'],[/MiniPay address/g,'Wallet address']];
+  function walk(root){
+    if(!root) return;
+    var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null), n, list=[];
+    while((n=w.nextNode())) if(n.nodeValue.indexOf('MiniPay')>=0) list.push(n);
+    list.forEach(function(t){ var v=t.nodeValue; MAP.forEach(function(m){ v=v.replace(m[0],m[1]); }); if(v!==t.nodeValue) t.nodeValue=v; });
+  }
+  function relabel(){
+    walk(document.getElementById('walletBody')); walk(document.getElementById('buyBtn'));
+    var a=document.getElementById('mp-addr'); if(a){ var g=a.closest('.fg'); if(g) g.style.display='none'; }
+  }
+})();
+
+// ── v46: wallet connector without the pop-up modal (clear errors, wallet app links) + "wallet" wording instead of MiniPay ──
+(function(){
+  if(window.__v46) return; window.__v46=1;
+  var PID='6c4c7bf3ffbf3bd413b1595d153b90bc';
+  var CDN=['https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js','https://unpkg.com/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js'];
+  var wc=null, pending=null;
+  function el(t,txt,css){ var e=document.createElement(t); if(txt!=null) e.textContent=txt; if(css) e.style.cssText=css; return e; }
+  var BEFORE=new Set(Object.getOwnPropertyNames(window)), found=null, newKeys=[];
+  function isEP(v){ return v&&(typeof v==='function'||typeof v==='object')&&typeof v.init==='function'; }
+  function pickEP(v){ if(!v) return null; try{ if(isEP(v)) return v; if(isEP(v.EthereumProvider)) return v.EthereumProvider; if(v.default){ if(isEP(v.default)) return v.default; if(isEP(v.default.EthereumProvider)) return v.default.EthereumProvider; } }catch(e){} return null; }
+  function lib(){
+    if(found) return found;
+    var names=['@walletconnect/ethereum-provider','WalletConnectEthereumProvider','EthereumProvider','WalletConnectProvider'];
+    for(var i=0;i<names.length;i++){ var r=pickEP(window[names[i]]); if(r) return (found=r); }
+    var ks=Object.getOwnPropertyNames(window).filter(function(k){ return !BEFORE.has(k); }); newKeys=ks;
+    for(var j=0;j<ks.length;j++){ var v; try{ v=window[ks[j]]; }catch(e){ continue; } var r2=pickEP(v); if(r2) return (found=r2); }
+    return null;
+  }
+  function addScript(src){ return new Promise(function(res,rej){ var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){ rej(new Error('blocked: '+src.split('/')[2])); }; document.head.appendChild(s); }); }
+  var ESM=['https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/+esm','https://esm.sh/@walletconnect/ethereum-provider@2.17.0'];
+  async function load(){
+    if(found) return found;
+    var last=null;
+    for(var i=0;i<ESM.length;i++){
+      try{
+        var m=await import(ESM[i]);
+        var r=pickEP(m)||pickEP(m&&m.default);
+        if(r) return (found=r);
+        last=new Error('loaded but no provider found: '+Object.keys(m||{}).slice(0,8).join(','));
+      }catch(e){ last=new Error(String((e&&e.message)||e).slice(0,90)+' @'+ESM[i].split('/')[2]); }
+    }
+    throw last||new Error('could not load connector');
+  }
+  async function make(){
+    var EP=await load();
+    var p=await EP.init({projectId:PID,chains:[42220],showQrModal:false,methods:['eth_sendTransaction','personal_sign'],rpcMap:{42220:'https://forno.celo.org'},
+      metadata:{name:'Page',description:'Read books and earn PAGE',url:location.origin,icons:[location.origin+'/icon-192.png']}});
+    var orig=p.request.bind(p);
+    p.request=function(a){ if(a&&/sendTransaction|personal_sign|signTypedData/.test(a.method)) openApp(); return orig(a); };
+    return p;
+  }
+  function openApp(){ try{
+    var sc=U&&U.minipay&&U.minipay.scheme; if(sc){ window.open(sc,'_self'); return; }
+    var m=wc&&wc.session&&wc.session.peer&&wc.session.peer.metadata, r=m&&m.redirect, l=r&&(r.native||r.universal); if(l) window.open(l,'_self'); }catch(e){} }
+  function use(p){ try{ Object.defineProperty(window,'ethereum',{value:p,configurable:true,writable:true}); }catch(e){ try{ window.ethereum=p; }catch(x){} } }
+  function closeLinks(){ var s=document.getElementById('wcLinks'); if(s) s.remove(); }
+  function showLinks(uri){
+    closeLinks();
+    var s=el('div',null,'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;'); s.id='wcLinks';
+    var b=el('div',null,'background:var(--card,#fff);color:var(--ink,#111);width:100%;max-width:420px;border-radius:14px 14px 0 0;padding:1rem;');
+    b.appendChild(el('div','Choose your wallet app','font-weight:800;font-size:1.05rem;margin-bottom:.2rem;'));
+    b.appendChild(el('div','Tap your wallet. It opens, you approve, then come back to this page.','font-size:.74rem;opacity:.7;margin-bottom:.7rem;'));
+    var enc=encodeURIComponent(uri);
+    function btn(label,sub,href,scheme){ var a=el('a',null,'display:block;border:1px solid var(--border,#ddd);border-radius:10px;padding:.65rem .75rem;margin-bottom:.45rem;color:inherit;text-decoration:none;');
+      a.href=href; a.appendChild(el('div',label,'font-weight:700;')); a.appendChild(el('div',sub,'font-size:.7rem;opacity:.65;')); a.onclick=function(){ pending=scheme||''; }; b.appendChild(a); }
+    btn('MetaMask','Opens the MetaMask app','metamask://wc?uri='+enc,'metamask://');
+    btn('Trust Wallet','Opens the Trust Wallet app','trust://wc?uri='+enc,'trust://');
+    btn('Any other wallet','Your phone lists the wallet apps that can open it',uri,'');
+    var cp=el('button','Copy connection link',null); cp.className='btn btn-outline btn-full'; cp.type='button';
+    cp.onclick=function(){ try{ navigator.clipboard.writeText(uri); showToast('Link copied. Paste it in your wallet\'s WalletConnect option.'); }catch(e){ showToast('Could not copy.'); } };
+    b.appendChild(cp);
+    var x=el('button','Cancel',null); x.className='btn btn-outline btn-full'; x.type='button'; x.style.marginTop='.4rem'; x.onclick=function(){ closeLinks(); try{ if(wc&&!wc.session) wc.disconnect(); }catch(e){} }; b.appendChild(x);
+    s.appendChild(b); document.body.appendChild(s);
+  }
+  async function connect(){
+    try{
+      showToast('Preparing wallet connection…');
+      if(!wc) wc=await make();
+      try{ if(wc.session) await wc.disconnect(); }catch(e){}
+      pending=null;
+      wc.removeAllListeners&&wc.removeAllListeners('display_uri');
+      wc.on('display_uri',function(uri){ showLinks(uri); });
+      await wc.connect();
+      closeLinks();
+      var addr=(wc.accounts&&wc.accounts[0])||''; if(!isAddr(addr)){ showToast('The wallet did not return an address.'); return; }
+      var m=wc.session&&wc.session.peer&&wc.session.peer.metadata, name=(m&&m.name)||'Wallet';
+      use(wc); U.minipay={address:addr,at:Date.now(),wallet:name,via:'wc2',scheme:pending||''};
+      await persistU(); var p=document.getElementById('wcPick2'); if(p) p.remove(); updateUI(); showToast('✓ '+name+' connected: '+shortAddr(addr));
+    }catch(e){ closeLinks(); wc=null; showToast('Wallet error: '+String((e&&(e.message||e))||'unknown').slice(0,140)); }
+  }
+  // the "Wallet app" row in the wallet list now uses this connector
+  var restored=false;
+  setInterval(function(){
+    var s=document.getElementById('wcPick2');
+    if(s){ var row=Array.prototype.slice.call(s.querySelectorAll('button')).find(function(x){ return /Wallet app/.test(x.innerText); });
+      if(row&&!row.dataset.v46){ var n=row.cloneNode(true); n.dataset.v46='1'; row.parentNode.replaceChild(n,row); n.onclick=connect; } }
+    if(!restored&&U&&U.minipay&&U.minipay.via==='wc2'&&!window.ethereum){ restored=true; make().then(function(p){ wc=p; if(p.session&&p.accounts&&p.accounts[0]) use(p); }).catch(function(){ restored=false; }); }
+    relabel();
+  },700);
+
+  // wording: "wallet" instead of "MiniPay"
+  var MAP=[[/Buy PAGE with MiniPay/g,'Buy PAGE with your wallet'],[/Connect MiniPay/g,'Connect wallet'],[/MiniPay connected/g,'Wallet connected'],[/MiniPay address/g,'Wallet address']];
+  function walk(root){
+    if(!root) return;
+    var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null), n, list=[];
+    while((n=w.nextNode())) if(n.nodeValue.indexOf('MiniPay')>=0) list.push(n);
+    list.forEach(function(t){ var v=t.nodeValue; MAP.forEach(function(m){ v=v.replace(m[0],m[1]); }); if(v!==t.nodeValue) t.nodeValue=v; });
+  }
+  function relabel(){
+    walk(document.getElementById('walletBody')); walk(document.getElementById('buyBtn'));
+    var a=document.getElementById('mp-addr'); if(a){ var g=a.closest('.fg'); if(g) g.style.display='none'; }
+  }
+})();
+
+// ── v47: wallet connector without the pop-up modal (clear errors, wallet app links) + "wallet" wording instead of MiniPay ──
+(function(){
+  if(window.__v47) return; window.__v47=1;
+  var PID='6c4c7bf3ffbf3bd413b1595d153b90bc';
+  var CDN=['https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js','https://unpkg.com/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js'];
+  var wc=null, pending=null;
+  function el(t,txt,css){ var e=document.createElement(t); if(txt!=null) e.textContent=txt; if(css) e.style.cssText=css; return e; }
+  var BEFORE=new Set(Object.getOwnPropertyNames(window)), found=null, newKeys=[];
+  function isEP(v){ return v&&(typeof v==='function'||typeof v==='object')&&typeof v.init==='function'; }
+  function pickEP(v){ if(!v) return null; try{ if(isEP(v)) return v; if(isEP(v.EthereumProvider)) return v.EthereumProvider; if(v.default){ if(isEP(v.default)) return v.default; if(isEP(v.default.EthereumProvider)) return v.default.EthereumProvider; } }catch(e){} return null; }
+  function lib(){
+    if(found) return found;
+    var names=['@walletconnect/ethereum-provider','WalletConnectEthereumProvider','EthereumProvider','WalletConnectProvider'];
+    for(var i=0;i<names.length;i++){ var r=pickEP(window[names[i]]); if(r) return (found=r); }
+    var ks=Object.getOwnPropertyNames(window).filter(function(k){ return !BEFORE.has(k); }); newKeys=ks;
+    for(var j=0;j<ks.length;j++){ var v; try{ v=window[ks[j]]; }catch(e){ continue; } var r2=pickEP(v); if(r2) return (found=r2); }
+    return null;
+  }
+  function addScript(src){ return new Promise(function(res,rej){ var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){ rej(new Error('blocked: '+src.split('/')[2])); }; document.head.appendChild(s); }); }
+  var ESM=['https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/+esm','https://esm.sh/@walletconnect/ethereum-provider@2.17.0'];
+  async function load(){
+    if(found) return found;
+    var last=null;
+    for(var i=0;i<ESM.length;i++){
+      try{
+        var m=await import(ESM[i]);
+        var r=pickEP(m)||pickEP(m&&m.default);
+        if(r) return (found=r);
+        last=new Error('loaded but no provider found: '+Object.keys(m||{}).slice(0,8).join(','));
+      }catch(e){ last=new Error(String((e&&e.message)||e).slice(0,90)+' @'+ESM[i].split('/')[2]); }
+    }
+    throw last||new Error('could not load connector');
+  }
+  async function make(){
+    var EP=await load();
+    var p=await EP.init({projectId:PID,chains:[1],optionalChains:[42220],showQrModal:false,methods:['eth_sendTransaction','personal_sign'],rpcMap:{42220:'https://forno.celo.org'},
+      metadata:{name:'Page',description:'Read books and earn PAGE',url:location.origin,icons:[location.origin+'/icon-192.png']}});
+    var orig=p.request.bind(p);
+    p.request=function(a){ if(a&&/sendTransaction|personal_sign|signTypedData/.test(a.method)) openApp(); return orig(a); };
+    return p;
+  }
+  function openApp(){ try{
+    var sc=U&&U.minipay&&U.minipay.scheme; if(sc){ window.open(sc,'_self'); return; }
+    var m=wc&&wc.session&&wc.session.peer&&wc.session.peer.metadata, r=m&&m.redirect, l=r&&(r.native||r.universal); if(l) window.open(l,'_self'); }catch(e){} }
+  function use(p){ try{ Object.defineProperty(window,'ethereum',{value:p,configurable:true,writable:true}); }catch(e){ try{ window.ethereum=p; }catch(x){} } }
+  function closeLinks(){ var s=document.getElementById('wcLinks'); if(s) s.remove(); }
+  function showLinks(uri){
+    closeLinks();
+    var s=el('div',null,'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;'); s.id='wcLinks';
+    var b=el('div',null,'background:var(--card,#fff);color:var(--ink,#111);width:100%;max-width:420px;border-radius:14px 14px 0 0;padding:1rem;');
+    b.appendChild(el('div','Choose your wallet app','font-weight:800;font-size:1.05rem;margin-bottom:.2rem;'));
+    b.appendChild(el('div','Tap your wallet. It opens, you approve, then come back to this page.','font-size:.74rem;opacity:.7;margin-bottom:.7rem;'));
+    var enc=encodeURIComponent(uri);
+    function btn(label,sub,href,scheme){ var a=el('a',null,'display:block;border:1px solid var(--border,#ddd);border-radius:10px;padding:.65rem .75rem;margin-bottom:.45rem;color:inherit;text-decoration:none;');
+      a.href=href; a.appendChild(el('div',label,'font-weight:700;')); a.appendChild(el('div',sub,'font-size:.7rem;opacity:.65;')); a.onclick=function(){ pending=scheme||''; }; b.appendChild(a); }
+    btn('Choose from your phone\'s wallets (recommended)','Your phone lists the wallet apps that can open it',uri,'');
+    btn('MetaMask','Opens the MetaMask app','metamask://wc?uri='+enc,'metamask://');
+    btn('Trust Wallet','Opens the Trust Wallet app','trust://wc?uri='+enc,'trust://');
+    var cp=el('button','Copy connection link',null); cp.className='btn btn-outline btn-full'; cp.type='button';
+    cp.onclick=function(){ try{ navigator.clipboard.writeText(uri); showToast('Link copied. Paste it in your wallet\'s WalletConnect option.'); }catch(e){ showToast('Could not copy.'); } };
+    b.appendChild(cp);
+    var x=el('button','Cancel',null); x.className='btn btn-outline btn-full'; x.type='button'; x.style.marginTop='.4rem'; x.onclick=function(){ closeLinks(); try{ if(wc&&!wc.session) wc.disconnect(); }catch(e){} }; b.appendChild(x);
+    s.appendChild(b); document.body.appendChild(s);
+  }
+  async function connect(){
+    try{
+      showToast('Preparing wallet connection…');
+      if(!wc) wc=await make();
+      try{ if(wc.session) await wc.disconnect(); }catch(e){}
+      pending=null;
+      wc.removeAllListeners&&wc.removeAllListeners('display_uri');
+      wc.on('display_uri',function(uri){ showLinks(uri); });
+      await wc.connect();
+      closeLinks();
+      var addr=(wc.accounts&&wc.accounts[0])||''; if(!isAddr(addr)){ showToast('The wallet did not return an address.'); return; }
+      var m=wc.session&&wc.session.peer&&wc.session.peer.metadata, name=(m&&m.name)||'Wallet';
+      try{ if(typeof wc.setDefaultChain==='function') await wc.setDefaultChain('eip155:42220','https://forno.celo.org'); }catch(e){}
+      use(wc); U.minipay={address:addr,at:Date.now(),wallet:name,via:'wc2',scheme:pending||''};
+      await persistU(); var p=document.getElementById('wcPick2'); if(p) p.remove(); updateUI(); showToast('✓ '+name+' connected: '+shortAddr(addr));
+    }catch(e){ closeLinks(); wc=null; showToast('Wallet error: '+String((e&&(e.message||e))||'unknown').slice(0,140)); }
+  }
+  // the "Wallet app" row in the wallet list now uses this connector
+  var restored=false;
+  setInterval(function(){
+    var s=document.getElementById('wcPick2');
+    if(s){ var row=Array.prototype.slice.call(s.querySelectorAll('button')).find(function(x){ return /Wallet app/.test(x.innerText); });
+      if(row&&!row.dataset.v47){ var n=row.cloneNode(true); n.dataset.v47='1'; row.parentNode.replaceChild(n,row); n.onclick=connect; } }
+    if(!restored&&U&&U.minipay&&U.minipay.via==='wc2'&&!window.ethereum){ restored=true; make().then(function(p){ wc=p; if(p.session&&p.accounts&&p.accounts[0]) use(p); }).catch(function(){ restored=false; }); }
+    relabel();
+  },700);
+
+  // wording: "wallet" instead of "MiniPay"
+  var MAP=[[/Buy PAGE with MiniPay/g,'Buy PAGE with your wallet'],[/Connect MiniPay/g,'Connect wallet'],[/MiniPay connected/g,'Wallet connected'],[/MiniPay address/g,'Wallet address']];
+  function walk(root){
+    if(!root) return;
+    var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null), n, list=[];
+    while((n=w.nextNode())) if(n.nodeValue.indexOf('MiniPay')>=0) list.push(n);
+    list.forEach(function(t){ var v=t.nodeValue; MAP.forEach(function(m){ v=v.replace(m[0],m[1]); }); if(v!==t.nodeValue) t.nodeValue=v; });
+  }
+  function relabel(){
+    walk(document.getElementById('walletBody')); walk(document.getElementById('buyBtn'));
+    var a=document.getElementById('mp-addr'); if(a){ var g=a.closest('.fg'); if(g) g.style.display='none'; }
+  }
+})();
+
+// ── v48: wallet connector without the pop-up modal (clear errors, wallet app links) + "wallet" wording instead of MiniPay ──
+(function(){
+  if(window.__v48) return; window.__v48=1;
+  var PID='6c4c7bf3ffbf3bd413b1595d153b90bc';
+  var CDN=['https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js','https://unpkg.com/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js'];
+  var wc=null, pending=null;
+  function el(t,txt,css){ var e=document.createElement(t); if(txt!=null) e.textContent=txt; if(css) e.style.cssText=css; return e; }
+  var BEFORE=new Set(Object.getOwnPropertyNames(window)), found=null, newKeys=[];
+  function isEP(v){ return v&&(typeof v==='function'||typeof v==='object')&&typeof v.init==='function'; }
+  function pickEP(v){ if(!v) return null; try{ if(isEP(v)) return v; if(isEP(v.EthereumProvider)) return v.EthereumProvider; if(v.default){ if(isEP(v.default)) return v.default; if(isEP(v.default.EthereumProvider)) return v.default.EthereumProvider; } }catch(e){} return null; }
+  function lib(){
+    if(found) return found;
+    var names=['@walletconnect/ethereum-provider','WalletConnectEthereumProvider','EthereumProvider','WalletConnectProvider'];
+    for(var i=0;i<names.length;i++){ var r=pickEP(window[names[i]]); if(r) return (found=r); }
+    var ks=Object.getOwnPropertyNames(window).filter(function(k){ return !BEFORE.has(k); }); newKeys=ks;
+    for(var j=0;j<ks.length;j++){ var v; try{ v=window[ks[j]]; }catch(e){ continue; } var r2=pickEP(v); if(r2) return (found=r2); }
+    return null;
+  }
+  function addScript(src){ return new Promise(function(res,rej){ var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){ rej(new Error('blocked: '+src.split('/')[2])); }; document.head.appendChild(s); }); }
+  var ESM=['https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/+esm','https://esm.sh/@walletconnect/ethereum-provider@2.17.0'];
+  async function load(){
+    if(found) return found;
+    var last=null;
+    for(var i=0;i<ESM.length;i++){
+      try{
+        var m=await import(ESM[i]);
+        var r=pickEP(m)||pickEP(m&&m.default);
+        if(r) return (found=r);
+        last=new Error('loaded but no provider found: '+Object.keys(m||{}).slice(0,8).join(','));
+      }catch(e){ last=new Error(String((e&&e.message)||e).slice(0,90)+' @'+ESM[i].split('/')[2]); }
+    }
+    throw last||new Error('could not load connector');
+  }
+  async function make(){
+    var EP=await load();
+    var p=await EP.init({projectId:PID,chains:[1],optionalChains:[42220],showQrModal:false,methods:['eth_sendTransaction','personal_sign'],rpcMap:{42220:'https://forno.celo.org'},
+      metadata:{name:'Page',description:'Read books and earn PAGE',url:location.origin,icons:[location.origin+'/icon-192.png']}});
+    var orig=p.request.bind(p);
+    p.request=function(a){ if(a&&/sendTransaction|personal_sign|signTypedData/.test(a.method)) openApp(); return orig(a); };
+    return p;
+  }
+  function openApp(){ try{
+    var sc=U&&U.minipay&&U.minipay.scheme; if(sc){ window.open(sc,'_self'); return; }
+    var m=wc&&wc.session&&wc.session.peer&&wc.session.peer.metadata, r=m&&m.redirect, l=r&&(r.native||r.universal); if(l) window.open(l,'_self'); }catch(e){} }
+  function use(p){ try{ Object.defineProperty(window,'ethereum',{value:p,configurable:true,writable:true}); }catch(e){ try{ window.ethereum=p; }catch(x){} } }
+  function closeLinks(){ var s=document.getElementById('wcLinks'); if(s) s.remove(); }
+  function showLinks(uri){
+    closeLinks();
+    var s=el('div',null,'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;'); s.id='wcLinks';
+    var b=el('div',null,'background:var(--card,#fff);color:var(--ink,#111);width:100%;max-width:420px;border-radius:14px 14px 0 0;padding:1rem;');
+    b.appendChild(el('div','Choose your wallet app','font-weight:800;font-size:1.05rem;margin-bottom:.2rem;'));
+    b.appendChild(el('div','Tap your wallet. It opens, you approve, then come back to this page.','font-size:.74rem;opacity:.7;margin-bottom:.7rem;'));
+    var enc=encodeURIComponent(uri);
+    function btn(label,sub,href,scheme){ var a=el('a',null,'display:block;border:1px solid var(--border,#ddd);border-radius:10px;padding:.65rem .75rem;margin-bottom:.45rem;color:inherit;text-decoration:none;');
+      a.href=href; a.appendChild(el('div',label,'font-weight:700;')); a.appendChild(el('div',sub,'font-size:.7rem;opacity:.65;')); a.onclick=function(){ pending=scheme||''; }; b.appendChild(a); }
+    btn('Choose from your phone\'s wallets (recommended)','Your phone lists the wallet apps that can open it',uri,'');
+    btn('MetaMask','Opens the MetaMask app','metamask://wc?uri='+enc,'metamask://');
+    btn('Trust Wallet','Opens the Trust Wallet app','trust://wc?uri='+enc,'trust://');
+    var cp=el('button','Copy connection link',null); cp.className='btn btn-outline btn-full'; cp.type='button';
+    cp.onclick=function(){ try{ navigator.clipboard.writeText(uri); showToast('Link copied. Paste it in your wallet\'s WalletConnect option.'); }catch(e){ showToast('Could not copy.'); } };
+    b.appendChild(cp);
+    var x=el('button','Cancel',null); x.className='btn btn-outline btn-full'; x.type='button'; x.style.marginTop='.4rem'; x.onclick=function(){ closeLinks(); try{ if(wc&&!wc.session) wc.disconnect(); }catch(e){} }; b.appendChild(x);
+    s.appendChild(b); document.body.appendChild(s);
+  }
+  var done=false, connecting=false;
+  async function finalize(p){
+    if(done) return;
+    var addr=(p.accounts&&p.accounts[0])||''; if(!isAddr(addr)) return;
+    done=true; connecting=false; closeLinks();
+    var m=p.session&&p.session.peer&&p.session.peer.metadata, name=(m&&m.name)||'Wallet';
+    try{ if(typeof p.setDefaultChain==='function') await p.setDefaultChain('eip155:42220','https://forno.celo.org'); }catch(e){}
+    wc=p; use(p);
+    U.minipay={address:addr,at:Date.now(),wallet:name,via:'wc2',scheme:pending||''};
+    await persistU(); var pk=document.getElementById('wcPick2'); if(pk) pk.remove(); updateUI(); showToast('✓ '+name+' connected: '+shortAddr(addr));
+  }
+  function tryOpen(uri){
+    try{ location.href=uri; }catch(e){}
+    setTimeout(function(){ if(!done&&connecting&&!document.hidden) showLinks(uri); },1800);
+  }
+  async function connect(){
+    try{
+      showToast('Opening your wallets…');
+      done=false; connecting=true; pending='';
+      if(!wc) wc=await make();
+      try{ if(wc.session) await wc.disconnect(); }catch(e){}
+      wc.removeAllListeners&&wc.removeAllListeners('display_uri');
+      wc.on('display_uri',function(uri){ tryOpen(uri); });
+      var poll=setInterval(function(){ if(wc&&wc.session&&wc.accounts&&wc.accounts[0]){ clearInterval(poll); finalize(wc); } },1000);
+      try{ await wc.connect(); }finally{ clearInterval(poll); }
+      await finalize(wc);
+    }catch(e){ connecting=false; closeLinks(); wc=null; showToast('Wallet error: '+String((e&&(e.message||e))||'unknown').slice(0,140)); }
+  }
+  // coming back from the wallet app: wake the connection and pick up the approval
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden||!connecting||!wc) return;
+    try{ var r=wc.signer&&wc.signer.client&&wc.signer.client.core&&wc.signer.client.core.relayer; if(r&&r.restartTransport) r.restartTransport(); }catch(e){}
+    setTimeout(function(){ if(wc&&wc.session&&wc.accounts&&wc.accounts[0]) finalize(wc); },1200);
+  });
+  // the page was reloaded while you were in the wallet app: the saved session is still there
+  function hasSavedSession(){ try{ return Object.keys(localStorage).some(function(k){ return k.indexOf('wc@2:client')===0&&/session/.test(k)&&localStorage.getItem(k)&&localStorage.getItem(k)!=='[]'; }); }catch(e){ return false; } }
+  var tried=false;
+  // the "Wallet app" row in the wallet list now uses this connector
+  var restored=false;
+  setInterval(function(){
+    var s=document.getElementById('wcPick2');
+    if(s){ var row=Array.prototype.slice.call(s.querySelectorAll('button')).find(function(x){ return /Wallet app/.test(x.innerText); });
+      if(row&&!row.dataset.v48){ var n=row.cloneNode(true); n.dataset.v48='1'; row.parentNode.replaceChild(n,row); n.onclick=connect; } }
+    if(!restored&&U&&U.minipay&&U.minipay.via==='wc2'&&!window.ethereum){ restored=true; make().then(function(p){ wc=p; if(p.session&&p.accounts&&p.accounts[0]) use(p); }).catch(function(){ restored=false; }); }
+    if(!tried&&U&&!U.minipay&&!window.ethereum&&hasSavedSession()){ tried=true; make().then(function(p){ wc=p; if(p.session&&p.accounts&&p.accounts[0]) finalize(p); }).catch(function(){}); }
+    relabel();
+  },700);
+
+  // wording: "wallet" instead of "MiniPay"
+  var MAP=[[/Buy PAGE with MiniPay/g,'Buy PAGE with your wallet'],[/Connect MiniPay/g,'Connect wallet'],[/MiniPay connected/g,'Wallet connected'],[/MiniPay address/g,'Wallet address']];
+  function walk(root){
+    if(!root) return;
+    var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null), n, list=[];
+    while((n=w.nextNode())) if(n.nodeValue.indexOf('MiniPay')>=0) list.push(n);
+    list.forEach(function(t){ var v=t.nodeValue; MAP.forEach(function(m){ v=v.replace(m[0],m[1]); }); if(v!==t.nodeValue) t.nodeValue=v; });
+  }
+  function relabel(){
+    walk(document.getElementById('walletBody')); walk(document.getElementById('buyBtn'));
+    var a=document.getElementById('mp-addr'); if(a){ var g=a.closest('.fg'); if(g) g.style.display='none'; }
+  }
+})();
+
+// ── v51: comic / picture books · no quiz for Entertainment · Terms wording · old-link redirect ──
+(function(){
+  if(window.__v51) return; window.__v51=1;
+
+  // 1) the old Netlify link sends people to the new link (only if the new link is reachable)
+  (function(){
+    var NEW='https://pagecoin.pagebook.workers.dev';
+    if(!/netlify\.app$/.test(location.hostname)) return;
+    fetch(NEW+'/manifest.json',{mode:'no-cors',cache:'no-store'}).then(function(){
+      var go=function(){ location.replace(NEW+location.pathname+location.search+location.hash); };
+      try{ Promise.resolve(flushOutbox()).then(go,go); }catch(e){ go(); }
+    }).catch(function(){});
+  })();
+
+  // 2) Terms wording: wallets in general, no quiz in Entertainment
+  var T=[
+    ['through MiniPay, a third-party wallet.','through a third-party crypto wallet, such as MiniPay or MetaMask.'],
+    ["MiniPay's own terms","your wallet provider's own terms"],
+    ['made from the text you just read.','made from the text you just read. Books in the Entertainment category have no quiz: tokens earned while reading them go straight to your balance.']
+  ];
+  function fixTerms(){ var b=document.querySelector('#termsVeil .terms-body'); if(!b) return; var h=b.innerHTML, n=h; T.forEach(function(p){ if(n.indexOf(p[0])>-1&&n.indexOf(p[1])<0) n=n.replace(p[0],p[1]); }); if(n!==h) b.innerHTML=n; }
+  setInterval(fixTerms,3000); fixTerms();
+
+  // 3) Entertainment books: no quiz. Tokens go straight to the balance; reading still counts for rating.
+  function ent(){ var b=(typeof allBooks!=='undefined'?allBooks:[]).find(function(x){ return x.id===activeBookId; }); return !!(b&&/^entertainment$/i.test(String(b.category||'').trim())); }
+  setInterval(function(){
+    var st=window.__v19st, open=document.getElementById('readerVeil')&&document.getElementById('readerVeil').classList.contains('on');
+    if(!st) return;
+    var on=!!(open&&activeBookId&&ent());
+    if(on){
+      st.bypass=true;
+      var hb=document.getElementById('holdBar'); if(hb) hb.style.display='none';
+      if(!st.quiz&&st.secs) st.secs.forEach(function(s){
+        if(s.done) return;
+        var need=Math.ceil(s.words/500*60);
+        if(s.seen&&s.seen.size>=Math.ceil(s.els.length*0.7)&&s.dwell>=Math.floor(need*0.5)) s.done=true;
+      });
+    }else if(st.bypass&&!st.quiz){ st.bypass=false; var h2=document.getElementById('holdBar'); if(h2) h2.style.display=''; }
+  },400);
+
+  // 4) comics: upload pictures or a picture-only PDF; the reader shows them as pages
+  var COMIC='@@img1@@', MAX_PAGES_C=80, MAX_TOTAL=6000000, CH=700000;
+  function el(t,txt,css){ var e=document.createElement(t); if(txt!=null) e.textContent=txt; if(css) e.style.cssText=css; return e; }
+  function setStatus(t){ var s=document.getElementById('uploadStatus'); if(s) s.textContent=t; }
+  function enc(src,w,q){ // src: canvas-drawable (Image/Canvas) -> jpeg data url
+    var sw=src.naturalWidth||src.width, sh=src.naturalHeight||src.height, k=Math.min(1,w/sw), cw=Math.round(sw*k), chh=Math.round(sh*k);
+    var c=document.createElement('canvas'); c.width=cw; c.height=chh; var x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,cw,chh); x.drawImage(src,0,0,cw,chh);
+    return c.toDataURL('image/jpeg',q);
+  }
+  function loadImg(file){ return new Promise(function(res,rej){ var u=URL.createObjectURL(file), im=new Image(); im.onload=function(){ URL.revokeObjectURL(u); res(im); }; im.onerror=function(){ URL.revokeObjectURL(u); rej(new Error('Could not read '+file.name)); }; im.src=u; }); }
+  function fromDataUrl(d){ return new Promise(function(res,rej){ var im=new Image(); im.onload=function(){ res(im); }; im.onerror=rej; im.src=d; }); }
+  async function pagesFromImages(files){
+    files=files.slice().sort(function(a,b){ return a.name.localeCompare(b.name,undefined,{numeric:true}); }).slice(0,MAX_PAGES_C);
+    var out=[]; for(var i=0;i<files.length;i++){ setStatus('Preparing picture '+(i+1)+' of '+files.length+'…'); out.push(enc(await loadImg(files[i]),800,0.5)); } return out;
+  }
+  async function pagesFromPdf(file){
+    if(typeof pdfjsLib==='undefined') await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js');
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    var pdf=await pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise, n=Math.min(pdf.numPages,MAX_PAGES_C), out=[];
+    for(var i=1;i<=n;i++){
+      setStatus('Preparing page '+i+' of '+n+'…');
+      var pg=await pdf.getPage(i), vp=pg.getViewport({scale:1}), sc=Math.min(2,800/vp.width), v=pg.getViewport({scale:sc});
+      var c=document.createElement('canvas'); c.width=Math.round(v.width); c.height=Math.round(v.height);
+      var x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height);
+      await pg.render({canvasContext:x,viewport:v}).promise; out.push(c.toDataURL('image/jpeg',0.5));
+    }
+    return out;
+  }
+  async function onComic(ev){
+    var files=Array.prototype.slice.call(ev.target.files||[]); ev.target.value=''; if(!files.length) return;
+    try{
+      var pages=(files.length===1&&(/pdf/i.test(files[0].type)||/\.pdf$/i.test(files[0].name)))?await pagesFromPdf(files[0]):await pagesFromImages(files.filter(function(f){ return /^image\//.test(f.type); }));
+      if(!pages.length){ showToast('No pictures found.'); setStatus('Click to upload your file'); return; }
+      var total=pages.reduce(function(a,p){ return a+p.length+9; },0);
+      if(total>MAX_TOTAL){ // squeeze once
+        setStatus('Making the pages smaller…'); var sm=[]; for(var i=0;i<pages.length;i++){ sm.push(enc(await fromDataUrl(pages[i]),650,0.4)); } pages=sm; total=pages.reduce(function(a,p){ return a+p.length+9; },0);
+      }
+      if(total>MAX_TOTAL){ showToast('Too big ('+Math.round(total/1e6*10)/10+' MB of pictures). Use fewer pages (about '+Math.floor(pages.length*MAX_TOTAL/total)+' fit).'); setStatus('Click to upload your file'); return; }
+      parsedFileText=pages.map(function(p){ return COMIC+p; }).join('\n');
+      var z=document.getElementById('uploadZone'); if(z) z.classList.add('ready');
+      setStatus('🖼 '+pages.length+' picture pages ready');
+      var cat=document.getElementById('p-cat'); if(cat){ for(var k=0;k<cat.options.length;k++) if(/entertainment/i.test(cat.options[k].text)) cat.selectedIndex=k; }
+      if(!coverData){ try{ coverData=enc(await fromDataUrl(pages[0]),300,0.6); var cs=document.getElementById('coverStatus'); if(cs) cs.textContent='Cover taken from page 1'; }catch(e){} }
+      showToast('✓ '+pages.length+' pages ready. Check the title and price, then publish.');
+    }catch(e){ showToast(e&&e.message?e.message:'Could not prepare the pictures.'); setStatus('Click to upload your file'); }
+  }
+  function ui(){
+    var z=document.getElementById('uploadZone'); if(!z) return;
+    if(!document.getElementById('comicBtn')){
+      var inp=document.createElement('input'); inp.type='file'; inp.id='comicIn'; inp.accept='image/*,application/pdf'; inp.multiple=true; inp.style.display='none'; inp.onchange=onComic;
+      var b=el('button','🖼️ Upload a comic or picture book',null); b.id='comicBtn'; b.type='button'; b.className='btn btn-outline btn-full'; b.style.margin='.5rem 0'; b.onclick=function(){ inp.click(); };
+      var hint=el('div','Choose several pictures (in page order) or one PDF made of pictures.','font-size:.7rem;opacity:.65;margin-bottom:.4rem;');
+      z.parentNode.insertBefore(b,z.nextSibling); b.parentNode.insertBefore(hint,b.nextSibling); document.body.appendChild(inp);
+    }
+    // the text editor is not for pictures
+    var isC=(typeof parsedFileText==='string'&&parsedFileText.indexOf(COMIC)===0);
+    if(document.body.classList.contains('comicMode')!==isC) document.body.classList.toggle('comicMode',isC);
+    if(!document.getElementById('comicCss')){ var st=document.createElement('style'); st.id='comicCss'; st.textContent='body.comicMode #editMsBtn,body.comicMode #mEdit{display:none!important}'; document.head.appendChild(st); }
+  }
+  setInterval(ui,400);
+
+  // publishing a comic: big chunks, nothing heavy in the catalog listing
+  var _pub=publishBook;
+  publishBook=async function(){
+    if(!(typeof parsedFileText==='string'&&parsedFileText.indexOf(COMIC)===0)) return _pub.apply(this,arguments);
+    if(isUserMinor()){ showToast('Under 18 accounts cannot publish books yet.'); return; }
+    var title=document.getElementById('p-title').value.trim();
+    var priceLocal=parseFloat(document.getElementById('p-price').value)||0, priceCur=document.getElementById('p-cur').value||'USD';
+    var priceUSD=Math.round(priceLocal/(FX[priceCur]||1)*100)/100, cover=coverData;
+    if(!title){ showToast('Enter a book title.'); return; }
+    if(isNaN(priceUSD)||priceUSD<0){ showToast('Enter a price of 0 or more.'); return; }
+    if(!cover) cover='https://images.unsplash.com/photo-1543002588-bfa74002ed7e?q=80&w=400';
+    try{
+      var price=tokenPrice(), buyerUSD=priceUSD*(1+SYS_MARGIN), pieces=[];
+      for(var i=0;i<parsedFileText.length;i+=CH) pieces.push(parsedFileText.slice(i,i+CH));
+      showToast('Publishing…');
+      var catEl=document.getElementById('p-cat'), category=catEl?catEl.value:'';
+      var ref=await db.collection('books').add({title:title,priceUSD:priceUSD,buyerUSD:buyerUSD,priceLocal:priceLocal,priceCur:priceCur,priceTokens:buyerUSD/price,cover:cover,content:'',pages:pieces.length+1,category:category,authorUID:U.uid,authorName:U.username,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+      await Promise.all(pieces.map(function(text,k){ var n=k+1; return db.collection('bookpages').doc(ref.id+'_'+n).set({bookId:ref.id,i:n,text:text}); }));
+      if(!Array.isArray(U.ownedBooks)) U.ownedBooks=[];
+      U.ownedBooks.push(ref.id); U.booksBought=(U.booksBought||0)+1;
+      showSuccess('Comic Published!','"'+title+'" is now live in the catalog for all users.');
+      persistU();
+      document.getElementById('p-title').value=''; document.getElementById('p-price').value='2'; document.getElementById('p-cur').value='USD';
+      coverData=''; try{ document.getElementById('coverIn').value=''; document.getElementById('coverStatus').textContent='Choose a photo from your files'; document.getElementById('coverPrev').style.display='none'; }catch(e){}
+      setStatus('Click to upload your file'); try{ document.getElementById('uploadZone').classList.remove('ready'); }catch(e){}
+      parsedFileText=''; updateBuyerPrice();
+      setTimeout(function(){ switchTab('library'); },900);
+    }catch(e){ showToast('Publish failed: '+(e&&e.message||'unknown error')); }
+  };
+
+  // reading: picture pages show as pictures
+  function imgs(){
+    var b=document.getElementById('readerBody'); if(!b) return;
+    b.querySelectorAll('p').forEach(function(p){
+      var t=p.textContent; if(t.indexOf(COMIC)!==0) return;
+      var im=new Image(); im.src=t.slice(COMIC.length); im.alt='page'; im.style.cssText='display:block;width:100%;max-width:900px;margin:.3rem auto;';
+      p.textContent=''; p.style.padding='0'; p.appendChild(im);
+    });
+  }
+  var _ob=openBook; openBook=async function(){ var r=await _ob.apply(this,arguments); try{ imgs(); }catch(e){} return r; };
+})();
+
+window.__PAGE_SERVER='https://page-pay.pagebook.workers.dev';
+// ── v56: ask the wallet to send you back to the Page app after you approve ──
+(function(){
+  if(window.__v56) return; window.__v56=1;
+  var URLS=['https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.17.0/+esm','https://esm.sh/@walletconnect/ethereum-provider@2.17.0'];
+  function pick(m){ try{ var c=[m&&m.EthereumProvider,m&&m.default&&m.default.EthereumProvider,m&&m.default,m]; for(var i=0;i<c.length;i++){ var v=c[i]; if(v&&typeof v.init==='function') return v; } }catch(e){} return null; }
+  async function go(){
+    for(var i=0;i<URLS.length;i++){
+      try{
+        var m=await import(URLS[i]); var EP=pick(m); if(!EP||EP.__v56) continue;
+        var oi=EP.init.bind(EP); EP.__v56=1;
+        EP.init=function(o){ o=o||{}; var md=Object.assign({},o.metadata||{}); var back=location.origin+'/'; md.redirect={native:back,universal:back}; o.metadata=md; return oi(o); };
+      }catch(e){}
+    }
+  }
+  setTimeout(go,2500);
+})();
+
+// ── v57: hidden bot check (Cloudflare Turnstile, Managed) ──
+(function(){
+  if(window.__v57) return; window.__v57=1;
+  var KEY='0x4AAAAAAGOp8kpW0nJZegcx', tok=null, wid=null, sent=false, box=null;
+  function say(t){ try{ var d=document.getElementById('botMsg'); if(!d){ d=document.createElement('div'); d.id='botMsg'; d.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;background:#7a1f1f;color:#fff;padding:10px 12px;border-radius:10px;font:14px system-ui;text-align:center'; document.body.appendChild(d); } d.textContent=t; d.style.display=t?'block':'none'; }catch(e){} }
+  function mount(){
+    box=document.createElement('div'); box.id='tsBox'; box.style.cssText='position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:99998';
+    document.body.appendChild(box);
+    var s=document.createElement('script'); s.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.async=true;
+    s.onload=function(){ try{
+      wid=turnstile.render(box,{sitekey:KEY,appearance:'interact-only',callback:function(t){ tok=t; try{ send(); }catch(e){} },
+        'error-callback':function(){ tok=null; },'expired-callback':function(){ tok=null; sent=false; try{ turnstile.reset(wid); }catch(e){} }});
+    }catch(e){} };
+    document.head.appendChild(s);
+  }
+  async function send(){
+    if(sent||!tok) return;
+    var u=null; try{ u=firebase.auth().currentUser; }catch(e){} if(!u) return;
+    var srv=window.__PAGE_SERVER; if(!srv) return;
+    sent=true;
+    try{
+      var idt=await u.getIdToken();
+      var r=await fetch(srv,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+idt},body:JSON.stringify({turnstile:tok})});
+      var j=await r.json().catch(function(){return {};});
+      if(j&&j.ok===true){ window.__botBad=false; say(''); }
+      else if(j&&j.ok===false){ window.__botBad=true; sent=false; tok=null; say('We could not confirm you are human. Mining and bidding are paused. Please try again.'); try{ turnstile.reset(wid); }catch(e){} }
+      else { sent=false; }   // check service not ready: do not block anyone
+    }catch(e){ sent=false; }
+  }
+  setInterval(function(){ try{ send(); }catch(e){} },2000);
+  try{
+    if(typeof Led!=='undefined'&&Led&&typeof Led.mine==='function'){ var m0=Led.mine; Led.mine=function(){ if(window.__botBad) return; return m0.apply(this,arguments); }; }
+  }catch(e){}
+  try{
+    if(typeof placeBid==='function'){ var pb=placeBid; placeBid=function(){ if(window.__botBad){ say('Bidding is paused until the human check passes.'); return; } return pb.apply(this,arguments); }; }
+  }catch(e){}
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',mount); else mount();
+})();
+
+// ── v60: "Trace a token" dropdown inside the wallet (nothing else changed) ──
+(function(){
+  if(window.__v60) return; window.__v60=1;
+  function esc2(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  // ── Trace a token ──
+  function lots(){ var a=[]; try{ (U.lots||[]).forEach(function(l){ a.push({id:String(l.id||''),q:l.q,where:'wallet'}); }); }catch(e){} return a; }
+  function norm2(s){ return String(s||'').toLowerCase().replace(/[^0-9a-f]/g,''); }
+  function trace(){
+    var inp=document.getElementById('trIn'), out=document.getElementById('trOut'); if(!inp||!out) return;
+    var q=norm2(inp.value); if(q.length<6){ out.innerHTML='<p style="font-size:.84rem;">Type at least 6 characters of the serial.</p>'; return; }
+    var rows=[], r=(typeof receipts!=='undefined'?receipts:[]);
+    r.forEach(function(x){ (x.serials||[]).forEach(function(s){ if(norm2(s.id).indexOf(q)>-1) rows.push({r:x,s:s}); }); });
+    var inW=lots().filter(function(l){ return norm2(l.id).indexOf(q)>-1; });
+    var h='';
+    if(inW.length) inW.forEach(function(l){ h+='<div class="bucket"><strong>In your wallet now</strong><span style="font-family:monospace;font-size:.66rem;word-break:break-all;">'+esc2(l.id)+' · '+(typeof fmtP==='function'?fmtP(l.q):l.q)+' PAGE</span></div>'; });
+    rows.sort(function(a,b){ return (a.r.at||0)-(b.r.at||0); });
+    rows.forEach(function(x){ h+='<div class="bucket"><strong>'+esc2(x.r.title)+'</strong><span>'+new Date(x.r.at).toLocaleString()+' · '+(typeof fmtP==='function'?fmtP(x.s.q):x.s.q)+' PAGE'+(x.r.usdMu&&typeof fmtMu==='function'?' · '+fmtMu(x.r.usdMu):'')+'</span><span style="font-family:monospace;font-size:.62rem;word-break:break-all;">'+esc2(x.s.id)+'</span></div>'; });
+    if(!h) h='<p style="font-size:.84rem;">No token with that serial is in your wallet or receipts. You can only trace tokens you have held.</p>';
+    else h='<p style="font-size:.78rem;color:var(--muted);">Oldest first. Each time a token is split or sold it gets a new serial, so a trace follows the serial you typed.</p>'+h;
+    out.innerHTML=h;
+  }
+  window.v60Trace=trace;
+  function add(){
+    var body=document.getElementById('walletBody'); var v=document.getElementById('walletVeil');
+    if(!body||!v||!v.classList.contains('on')||document.getElementById('trDrop')) return;
+    var d=document.createElement('details'); d.id='trDrop'; d.style.cssText='margin-top:.8rem;border:1px solid var(--border,#ddd);border-radius:8px;padding:.5rem .7rem;';
+    d.innerHTML='<summary style="cursor:pointer;font-weight:700;color:var(--gold);">Trace a token</summary><div class="fg" style="margin-top:.6rem;"><label>Token serial</label><input id="trIn" class="fc" placeholder="Paste a serial from a receipt" oninput="v60Trace()"/></div><div id="trOut" style="max-height:40vh;overflow:auto;"></div>';
+    body.appendChild(d);
+  }
+  setInterval(function(){ try{ add(); }catch(e){} },500);
+})();
+
+// ── v61: steady start-up — the splash screen stays until the screen has stopped changing, so the old sign-in forms never flash ──
+(function(){
+  if(window.__v61) return; window.__v61=1;
+  var QUIET=450, MAXWAIT=3000, done=false;
+  function settle(cb){
+    var t0=Date.now(), last=Date.now(), fired=false, mo=null, tm=null;
+    function go(){ if(fired) return; fired=true; try{ mo&&mo.disconnect(); }catch(e){} clearInterval(tm); cb(); }
+    try{
+      mo=new MutationObserver(function(list){
+        for(var i=0;i<list.length;i++){ var t=list[i].target; if(t&&t.nodeType===1&&t.closest&&t.closest('#splash')) continue; if(list[i].type==='childList'){ last=Date.now(); break; } }
+      });
+      mo.observe(document.body,{childList:true,subtree:true});
+    }catch(e){ return cb(); }
+    tm=setInterval(function(){ var n=Date.now(); if(n-last>=QUIET||n-t0>=MAXWAIT) go(); },100);
+  }
+  if(typeof hideSplash==='function'){
+    var h0=hideSplash;
+    hideSplash=function(){ if(done) return h0.apply(this,arguments); done=true; var a=arguments, self=this; settle(function(){ h0.apply(self,a); }); };
+  }
+  // wallet window: show it only after the other modules have rewritten its wording
+  if(typeof openWallet==='function'){
+    var w0=openWallet;
+    openWallet=function(){
+      var r=w0.apply(this,arguments);
+      try{ var b=document.getElementById('walletBody'); if(b){ b.style.visibility='hidden'; setTimeout(function(){ b.style.visibility=''; },520); } }catch(e){}
+      return r;
+    };
+  }
+})();
+
+// ── v62: under-18 (and unknown age) can never publish books or sell/cash out tokens ──
+(function(){
+  if(window.__v62) return; window.__v62=1;
+  function unknownAge(){ try{ return !!U&&(!U.dob||!parseDob(U.dob)); }catch(e){ return true; } }
+  function blocked(what){
+    try{
+      if(!U) return false;
+      if(isUserMinor()){ showToast('🔒 Under 18 accounts cannot '+what+'.'); return true; }
+      if(unknownAge()){ showToast('Enter your date of birth first. Under 18 accounts cannot '+what+'.'); try{ showDobModal(); }catch(e){} return true; }
+    }catch(e){ return true; }
+    return false;
+  }
+  // plain wrappers (functions are global declarations, so they can be re-assigned)
+  var o1=publishBook;            publishBook=function(){ if(blocked('publish books')) return; return o1.apply(this,arguments); };
+  var o2=registerAuctionQueue;   registerAuctionQueue=function(){ if(blocked('sell tokens')) return; return o2.apply(this,arguments); };
+  var o3=placeBid;               placeBid=function(){ if(blocked('bid on tokens')) return; return o3.apply(this,arguments); };
+  var o4=confirmCO;              confirmCO=function(){ if(blocked('cash out or sell tokens')) return; return o4.apply(this,arguments); };
+  var o5=openCO;                 openCO=function(){ if(blocked('cash out or sell tokens')) return; return o5.apply(this,arguments); };
+  var o6=withdrawCash;           withdrawCash=function(){ if(blocked('withdraw cash')) return; return o6.apply(this,arguments); };
+  var o7=switchTab;              switchTab=function(n){ if(n==='publish'&&blocked('publish books')) return; return o7.apply(this,arguments); };
 })();
 
 </script>
